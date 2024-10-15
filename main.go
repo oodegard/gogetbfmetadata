@@ -19,20 +19,9 @@ type SeriesInfo struct {
 func checkJavaInstallation() error {
 	_, err := exec.LookPath("java")
 	if err != nil {
-		return fmt.Errorf("Java is not installed or not in your PATH")
+		return fmt.Errorf("java is not installed or not in your path: %v", err)
 	}
 	return nil
-}
-
-// Function to check if the series are reduced versions of each other (based on size)
-func isReducedVersion(seriesInfos []SeriesInfo, widths []int, heights []int) bool {
-	for i := 1; i < len(seriesInfos); i++ {
-		// Check if width and height are halved in successive series
-		if widths[i] != widths[i-1]/2 || heights[i] != heights[i-1]/2 {
-			return false
-		}
-	}
-	return true
 }
 
 // Function to read metadata from an image using Bio-Formats
@@ -48,19 +37,21 @@ func readImageMetadata(imagePath, jarPath string) ([]SeriesInfo, error) {
 
 	// Convert output to string for parsing
 	outputStr := string(output)
+	//fmt.Printf("outputStr: %v\n", outputStr)
 
-	// Use regular expressions to extract relevant metadata
-	seriesRegex := regexp.MustCompile(`Series count = (/d+)`)
-	sizeTRegex := regexp.MustCompile(`SizeT = (/d+)`)
-	sizeCRegex := regexp.MustCompile(`SizeC = (/d+)`)
-	sizeZRegex := regexp.MustCompile(`SizeZ = (/d+)`)
+	// Use more flexible regular expressions to extract relevant metadata
+	seriesRegex := regexp.MustCompile(`Series\s*count\s*=\s*(\d+)`)
+	sizeTRegex := regexp.MustCompile(`SizeT\s*=\s*(\d+)`)
+	sizeCRegex := regexp.MustCompile(`SizeC\s*=\s*(\d+)`)
+	sizeZRegex := regexp.MustCompile(`SizeZ\s*=\s*(\d+)`)
 
 	// Extract values
 	seriesMatches := seriesRegex.FindStringSubmatch(outputStr)
+	fmt.Printf("seriesMatches: %v\n", seriesMatches)
 	sizeTMatches := sizeTRegex.FindAllStringSubmatch(outputStr, -1)
 	sizeCMatches := sizeCRegex.FindAllStringSubmatch(outputStr, -1)
 	sizeZMatches := sizeZRegex.FindAllStringSubmatch(outputStr, -1)
-
+	fmt.Printf("sizeZMatches: %v\n", sizeZMatches)
 	// Parse the extracted values
 	seriesCount := 0
 	if len(seriesMatches) > 1 {
@@ -107,13 +98,13 @@ func printSeriesGroups(seriesInfos []SeriesInfo) {
 		if i == n || seriesInfos[i] != seriesInfos[groupStart] {
 			// If end of group is reached, print the group
 			if groupStart == i-1 {
-				fmt.Printf("Series #%d:/n", groupStart)
+				fmt.Printf("Series #%d:\n", groupStart)
 			} else {
-				fmt.Printf("Series #%d-%d:/n", groupStart, i-1)
+				fmt.Printf("Series #%d-%d:\n", groupStart, i-1)
 			}
-			fmt.Printf("  Timepoints (T): %d/n", seriesInfos[groupStart].Timepoints)
-			fmt.Printf("  Channels (C): %d/n", seriesInfos[groupStart].Channels)
-			fmt.Printf("  Z-stacks (Z): %d/n", seriesInfos[groupStart].ZStacks)
+			fmt.Printf("  Timepoints (T): %d\n", seriesInfos[groupStart].Timepoints)
+			fmt.Printf("  Channels (C): %d\n", seriesInfos[groupStart].Channels)
+			fmt.Printf("  Z-stacks (Z): %d\n", seriesInfos[groupStart].ZStacks)
 
 			// Move groupStart to the current series
 			groupStart = i
@@ -129,8 +120,7 @@ func main() {
 	}
 
 	// Get command-line arguments for the image and jar paths
-	imagePath := "./path/to/your/image.ims"
-	imagePath = "C:/Users/Øyvind/OneDrive - Universitetet i Oslo/Work/03_UiO/01_ELN_auto/Barcoded nanobodies/127 - Barcoding all nanobodies + Halo dyes/DragonFly/20240321_abwo_IBIDI2/del/20240321_127_IBIDI2B_17_18_1.ims"
+	imagePath := "C:/Users/Øyvind/OneDrive - Universitetet i Oslo/Work/03_UiO/04_Microscope_images_DO_NOT_USE/20210225_017/Phafin2-GFP_MAP4K3-Halo549/3_RPE-1_Phafin2-GFP_MAP4K3-Halo549_3sec_001_D3D_ALX.dv"
 	jarPath := "./bioformats_package.jar"
 
 	if len(os.Args) > 1 {
@@ -143,7 +133,7 @@ func main() {
 	// Read the metadata from the image file
 	seriesInfos, err := readImageMetadata(imagePath, jarPath)
 	if err != nil {
-		fmt.Printf("Error: %v/n", err)
+		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
 
