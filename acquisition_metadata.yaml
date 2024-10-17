@@ -1,0 +1,29 @@
+Aquisition metadata:
+  Channels:
+    Channel 1:
+      Name ID: 'Channel:0:0 '
+      Emmision wavelength: "528.0"
+      Excitation wavelength: "477.0"
+    Channel 2:
+      Name ID: 'Channel:0:1 '
+      Emmision wavelength: "608.0"
+      Excitation wavelength: "571.0"
+  DateAndTime: 2020-11-18T19:49:51
+  Image dimensions:
+    SizeC: 2
+    SizeT: 181
+    SizeX: 1024
+    SizeY: 1024
+    SizeZ: 1
+  Pixel size:
+    PhysicalSizeX: 0.07999999821186066
+    PhysicalSizeY: 0.07999999821186066
+    PhysicalSizeZ: null
+Sample info:
+  Channels:
+    Channel 1:
+      Fluorophore: Please_fill_in_a_fluorophore
+      Sample name: Please_fill_in_a_sample_name
+    Channel 2:
+      Fluorophore: Please_fill_in_a_fluorophore
+      Sample name: Please_fill_in_a_sample_name

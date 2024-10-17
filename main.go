@@ -1,176 +1,218 @@
 package main
 
 import (
-	"flag"
+	"bytes"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
-	"regexp"
-	"strconv"
+
+	"gopkg.in/yaml.v2"
 )
 
-// Struct to hold metadata information
+// Metadata struct to hold the entire XML structure
 type Metadata struct {
-	SeriesInfos []SeriesInfo
-	//LaserWavelengths map[string]string
-	DateAndTime string
+	XMLName xml.Name `xml:"OME"`
+	Images  []Image  `xml:"Image"`
 }
 
-// Struct to hold series information
-type SeriesInfo struct {
-	C int
-	T int
-	X int
-	Y int
-	Z int
+// Image struct to hold image-specific metadata
+type Image struct {
+	ID              string `xml:"ID,attr"`
+	Name            string `xml:"Name,attr"`
+	AcquisitionDate string `xml:"AcquisitionDate"`
+	Pixels          Pixels `xml:"Pixels"`
 }
 
-// Function to check if Java is installed
-func checkJavaInstallation() error {
-	_, err := exec.LookPath("java")
-	if err != nil {
-		return fmt.Errorf("java is not installed or not in your path: %v", err)
-	}
-	return nil
+// Pixels struct to hold pixel-specific metadata
+type Pixels struct {
+	SizeX         int       `xml:"SizeX,attr"`
+	SizeY         int       `xml:"SizeY,attr"`
+	SizeZ         int       `xml:"SizeZ,attr"`
+	SizeC         int       `xml:"SizeC,attr"`
+	SizeT         int       `xml:"SizeT,attr"`
+	PhysicalSizeX float64   `xml:"PhysicalSizeX,attr"`
+	PhysicalSizeY float64   `xml:"PhysicalSizeY,attr"`
+	PhysicalSizeZ float64   `xml:"PhysicalSizeZ,attr"`
+	Channels      []Channel `xml:"Channel"` // Slice to hold channels
 }
 
-// Function to read metadata from an image using Bio-Formats
+// Channel struct to hold channel-specific metadata
+type Channel struct {
+	ID                   string `xml:"ID,attr"`
+	Name                 string `xml:"Name,attr"`
+	EmissionWavelength   string `xml:"EmissionWavelength,attr"`
+	ExcitationWavelength string `xml:"ExcitationWavelength,attr"`
+	SamplesPerPixel      int    `xml:"SamplesPerPixel,attr"`
+}
+
+// AcquisitionMetadata struct to match desired YAML structure
+type AcquisitionMetadata struct {
+	Channels    map[string]ChannelInfo `yaml:"Channels"`
+	DateAndTime string                 `yaml:"DateAndTime"`
+	ImageDims   ImageDimensions        `yaml:"Image dimensions"`
+	PixelSize   PixelSizeInfo          `yaml:"Pixel size"`
+}
+
+// ChannelInfo struct for channel details in YAML
+type ChannelInfo struct {
+	NameID               string `yaml:"Name ID"`
+	EmissionWavelength   string `yaml:"Emmision wavelength"`
+	ExcitationWavelength string `yaml:"Excitation wavelength"`
+}
+
+// ImageDimensions struct for image dimensions in YAML
+type ImageDimensions struct {
+	SizeC int `yaml:"SizeC"`
+	SizeT int `yaml:"SizeT"`
+	SizeX int `yaml:"SizeX"`
+	SizeY int `yaml:"SizeY"`
+	SizeZ int `yaml:"SizeZ"`
+}
+
+// PixelSizeInfo struct for pixel size information in YAML
+type PixelSizeInfo struct {
+	PhysicalSizeX float64  `yaml:"PhysicalSizeX"`
+	PhysicalSizeY float64  `yaml:"PhysicalSizeY"`
+	PhysicalSizeZ *float64 `yaml:"PhysicalSizeZ"`
+}
+
+// SampleInfo struct for user input fields
+type SampleInfo struct {
+	Channels map[string]ChannelSample `yaml:"Channels"`
+}
+
+// ChannelSample struct for user-defined channel details
+type ChannelSample struct {
+	Fluorophore string `yaml:"Fluorophore"`
+	SampleName  string `yaml:"Sample name"`
+}
+
+// FinalYAML struct to hold the complete structure for YAML output
+type FinalYAML struct {
+	AquisitionMetadata AcquisitionMetadata `yaml:"Aquisition metadata"`
+	SampleInfo         SampleInfo          `yaml:"Sample info"`
+}
+
 // Function to read metadata from an image using Bio-Formats
 func readImageMetadata(imagePath, jarPath string) (*Metadata, error) {
-	// The "-nopix" flag tells Bio-Formats to read only the metadata, skipping pixel data
-	cmd := exec.Command("java", "-cp", jarPath, "loci.formats.tools.ImageInfo", "-nopix", imagePath)
+	cmd := exec.Command("java", "-Dfile.encoding=UTF-8", "-cp", jarPath, "loci.formats.tools.ImageInfo", "-omexml-only", "-nopix", imagePath)
 	fmt.Printf("cmd: %v\n", cmd)
-	// Run the command and capture the output
-	output, err := cmd.CombinedOutput()
+	// Capture standard output
+	var out bytes.Buffer
+	cmd.Stdout = &out
+
+	// Run the command
+	err := cmd.Run()
 	if err != nil {
-		return nil, fmt.Errorf("error running Java command: %v", err)
+		fmt.Println("Error:", err)
+		return nil, fmt.Errorf("error parsing XML: %v", err)
 	}
 
-	// Convert output to string for parsing
-	outputStr := string(output)
-	fmt.Printf("outputStr: %v\n", outputStr)
+	output := out.String()
+	//fmt.Printf("output: %v\n", output)
 
-	// Use regular expressions to extract relevant metadata
-	seriesRegex := regexp.MustCompile(`Series\s*count\s*=\s*(\d+)`)
-	sizeTRegex := regexp.MustCompile(`SizeT\s*=\s*(\d+)`)
-	sizeCRegex := regexp.MustCompile(`SizeC\s*=\s*(\d+)`)
-	sizeZRegex := regexp.MustCompile(`SizeZ\s*=\s*(\d+)`)
+	// Unmarshal the XML output into the Metadata struct
+	var metadata Metadata
+	err = xml.Unmarshal([]byte(output), &metadata)
 
-	sizeXRegex := regexp.MustCompile(`Width\s*=\s*(\d+)`)
-	sizeYRegex := regexp.MustCompile(`Height\s*=\s*(\d+)`)
-
-	//laserRegex := regexp.MustCompile(`ExcitationWavelength\s*=\s*(\d+\s*nm)`)
-	thumbnailRegex := regexp.MustCompile(`Thumbnail\s*series\s*=\s*(true|false)`)
-
-	// Extract values
-	seriesMatches := seriesRegex.FindStringSubmatch(outputStr)
-	sizeTMatches := sizeTRegex.FindAllStringSubmatch(outputStr, -1)
-	sizeCMatches := sizeCRegex.FindAllStringSubmatch(outputStr, -1)
-	sizeZMatches := sizeZRegex.FindAllStringSubmatch(outputStr, -1)
-	//laserMatches := laserRegex.FindAllStringSubmatch(outputStr, -1)
-
-	sizeXMatches := sizeXRegex.FindAllStringSubmatch(outputStr, -1)
-	sizeYMatches := sizeYRegex.FindAllStringSubmatch(outputStr, -1)
-
-	thumbnailMatches := thumbnailRegex.FindAllStringSubmatch(outputStr, -1)
-
-	// Handle series count
-	seriesCount := 0
-	if len(seriesMatches) > 1 {
-		seriesCount, _ = strconv.Atoi(seriesMatches[1])
+	// We are not interested in the thumbnail images so we remove them from the metadata
+	if err != nil {
+		fmt.Println("Error:", err)
+		return nil, fmt.Errorf("error Unmarshaling XML: %v", err)
 	}
 
-	// Store metadata for non-thumbnail series
-	var seriesInfos []SeriesInfo
-	for i := 0; i < seriesCount; i++ {
-		if i < len(thumbnailMatches) && len(thumbnailMatches[i]) > 1 && thumbnailMatches[i][1] == "false" {
-			// Only process non-thumbnail series
+	return &metadata, nil
+}
 
-			sizeT, sizeC, sizeZ, sizeX, sizeY := 0, 0, 0, 0, 0
+// Function to create YAML structure and save it to a file
+// Function to create YAML structure and save it to a file
+func saveMetadataAsYAML(metadata *Metadata) error {
+	// Prepare the acquisition metadata structure
+	acquisition := AcquisitionMetadata{
+		Channels:    make(map[string]ChannelInfo),
+		DateAndTime: metadata.Images[0].AcquisitionDate, // Placeholder for date and time
+		ImageDims: ImageDimensions{
+			SizeC: metadata.Images[0].Pixels.SizeC,
+			SizeT: metadata.Images[0].Pixels.SizeT,
+			SizeX: metadata.Images[0].Pixels.SizeX,
+			SizeY: metadata.Images[0].Pixels.SizeY,
+			SizeZ: metadata.Images[0].Pixels.SizeZ,
+		},
+		PixelSize: PixelSizeInfo{
+			PhysicalSizeX: metadata.Images[0].Pixels.PhysicalSizeX,
+			PhysicalSizeY: metadata.Images[0].Pixels.PhysicalSizeY,
+			PhysicalSizeZ: nil, // Set to nil or appropriate value
+		},
+	}
 
-			if i < len(sizeTMatches) && len(sizeTMatches[i]) > 1 {
-				sizeT, _ = strconv.Atoi(sizeTMatches[i][1])
-			}
-			if i < len(sizeCMatches) && len(sizeCMatches[i]) > 1 {
-				sizeC, _ = strconv.Atoi(sizeCMatches[i][1])
-			}
-			if i < len(sizeZMatches) && len(sizeZMatches[i]) > 1 {
-				sizeZ, _ = strconv.Atoi(sizeZMatches[i][1])
-			}
+	// Fill in channel information for each channel in the metadata
+	for i, channel := range metadata.Images[0].Pixels.Channels {
+		channelInfo := ChannelInfo{
+			NameID:               fmt.Sprintf("%s %s", channel.ID, channel.Name),
+			EmissionWavelength:   channel.EmissionWavelength,
+			ExcitationWavelength: channel.ExcitationWavelength,
+		}
+		acquisition.Channels[fmt.Sprintf("Channel %d", i+1)] = channelInfo // Use i+1 to start numbering from 1
+	}
 
-			if i < len(sizeXMatches) && len(sizeXMatches[i]) > 1 {
-				sizeX, _ = strconv.Atoi(sizeXMatches[i][1])
-			}
+	// Prepare the sample information structure with placeholders
+	sample := SampleInfo{
+		Channels: make(map[string]ChannelSample),
+	}
 
-			if i < len(sizeYMatches) && len(sizeYMatches[i]) > 1 {
-				sizeY, _ = strconv.Atoi(sizeYMatches[i][1])
-			}
-
-			seriesInfos = append(seriesInfos, SeriesInfo{
-				T: sizeT,
-				C: sizeC,
-				Z: sizeZ,
-				X: sizeX,
-				Y: sizeY,
-			})
+	// Create placeholders for each channel
+	for i, _ := range metadata.Images[0].Pixels.Channels {
+		channelKey := fmt.Sprintf("Channel %d", i+1)
+		sample.Channels[channelKey] = ChannelSample{
+			Fluorophore: "Please_fill_in_a_fluorophore",
+			SampleName:  "Please_fill_in_a_sample_name",
 		}
 	}
 
-	// Extract laser wavelength information
-	//laserWavelengths := map[string]string{}
-	//for i, match := range laserMatches {
-	//	channelKey := fmt.Sprintf("Channel %d", i+1)
-	//	laserWavelengths[channelKey] = match[1]
-	//}
-
-	// Extract DateAndTime
-	dateTimeRegex := regexp.MustCompile(`DateAndTime\s*:\s*(\S+\s*\S+)`)
-	dateTimeMatch := dateTimeRegex.FindStringSubmatch(outputStr)
-	dateAndTime := ""
-	if len(dateTimeMatch) > 1 {
-		dateAndTime = dateTimeMatch[1]
+	// Combine acquisition metadata and sample information
+	finalYAML := FinalYAML{
+		AquisitionMetadata: acquisition,
+		SampleInfo:         sample,
 	}
 
-	// Create the Metadata struct and return it
-	metadata := &Metadata{
-		SeriesInfos: seriesInfos,
-		//LaserWavelengths: laserWavelengths,
-		DateAndTime: dateAndTime,
+	// Convert to YAML
+	yamlData, err := yaml.Marshal(finalYAML)
+	if err != nil {
+		return fmt.Errorf("error marshaling to YAML: %v", err)
 	}
 
-	return metadata, nil
+	// Write YAML data to file
+	fileName := "acquisition_metadata.yaml"
+	err = os.WriteFile(fileName, yamlData, 0644)
+	if err != nil {
+		return fmt.Errorf("error writing to YAML file: %v", err)
+	}
+
+	fmt.Printf("YAML metadata saved to %s\n", fileName)
+	return nil
 }
 
 // Main function
 func main() {
-	// Define command-line flags
-	imagePath := flag.String("image", "C:/Users/Øyvind/OneDrive - Universitetet i Oslo/Work/03_UiO/04_Microscope_images_DO_NOT_USE/20240215_123_antibodyTest/20240215_123_DFCP1-GFP_IBIDI1B_ELYS_7.ims", "Path to the image file")
-	jarPath := flag.String("jar", "./bioformats_package.jar", "Path to the Bioformats JAR file")
-	showHelp := flag.Bool("h", false, "Show help message")
+	// Define image path and jar path
+	imagePath := "C:/Users/Øyvind/OneDrive - Universitetet i Oslo/Work/03_UiO/04_Microscope_images_DO_NOT_USE/20240215_123_antibodyTest/20240215_123_DFCP1-GFP_IBIDI1B_ELYS_7.ims"
+	imagePath = "C:/Users/Øyvind/OneDrive - Universitetet i Oslo/Work/03_UiO/04_Microscope_images_DO_NOT_USE/20201108_004/004_SIN1_RICTR_MAP4K3_vPhaffin/RPE_MAP4K3-GFP_Phafin2-Halo_02_visit_1_D3D.dv"
 
-	// Parse the flags
-	flag.Parse()
-
-	// Show help message if requested
-	if *showHelp {
-		flag.Usage()
-		return
-	}
-
-	// Check if Java is installed
-	if err := checkJavaInstallation(); err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
+	jarPath := "./bioformats_package.jar"
 
 	// Read the metadata from the image file
-	metadata, err := readImageMetadata(*imagePath, *jarPath)
+	metadata, err := readImageMetadata(imagePath, jarPath)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
-
-	// Print metadata
 	fmt.Printf("metadata: %v\n", metadata)
 
+	// Save metadata to YAML file
+	err = saveMetadataAsYAML(metadata)
+	if err != nil {
+		fmt.Printf("Error: %v\n", err)
+		os.Exit(1)
+	}
 }
