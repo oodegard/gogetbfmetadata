@@ -3,10 +3,15 @@ package main
 import (
 	"bytes"
 	"encoding/xml"
+	"flag"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 
+	"github.com/joho/godotenv"
 	"gopkg.in/yaml.v2"
 )
 
@@ -39,11 +44,11 @@ type Pixels struct {
 
 // Channel struct to hold channel-specific metadata
 type Channel struct {
-	ID                   string `xml:"ID,attr"`
-	Name                 string `xml:"Name,attr"`
-	EmissionWavelength   string `xml:"EmissionWavelength,attr"`
-	ExcitationWavelength string `xml:"ExcitationWavelength,attr"`
-	SamplesPerPixel      int    `xml:"SamplesPerPixel,attr"`
+	ID                   string  `xml:"ID,attr"`
+	Name                 string  `xml:"Name,attr"`
+	EmissionWavelength   float64 `xml:"EmissionWavelength,attr"`
+	ExcitationWavelength float64 `xml:"ExcitationWavelength,attr"`
+	SamplesPerPixel      int     `xml:"SamplesPerPixel,attr"`
 }
 
 // AcquisitionMetadata struct to match desired YAML structure
@@ -56,9 +61,9 @@ type AcquisitionMetadata struct {
 
 // ChannelInfo struct for channel details in YAML
 type ChannelInfo struct {
-	NameID               string `yaml:"Name ID"`
-	EmissionWavelength   string `yaml:"Emmision wavelength"`
-	ExcitationWavelength string `yaml:"Excitation wavelength"`
+	NameID               string  `yaml:"Name ID"`
+	EmissionWavelength   float64 `yaml:"Emmision wavelength"`
+	ExcitationWavelength float64 `yaml:"Excitation wavelength"`
 }
 
 // ImageDimensions struct for image dimensions in YAML
@@ -80,6 +85,7 @@ type PixelSizeInfo struct {
 // SampleInfo struct for user input fields
 type SampleInfo struct {
 	Channels map[string]ChannelSample `yaml:"Channels"`
+	ELNID    string                   `yaml:"ELNID"`
 }
 
 // ChannelSample struct for user-defined channel details
@@ -127,7 +133,7 @@ func readImageMetadata(imagePath, jarPath string) (*Metadata, error) {
 
 // Function to create YAML structure and save it to a file
 // Function to create YAML structure and save it to a file
-func saveMetadataAsYAML(metadata *Metadata) error {
+func saveMetadataAsYAML(metadata *Metadata, metadataOutPath string) error {
 	// Prepare the acquisition metadata structure
 	acquisition := AcquisitionMetadata{
 		Channels:    make(map[string]ChannelInfo),
@@ -159,6 +165,7 @@ func saveMetadataAsYAML(metadata *Metadata) error {
 	// Prepare the sample information structure with placeholders
 	sample := SampleInfo{
 		Channels: make(map[string]ChannelSample),
+		ELNID:    "Please_fill_in_ELN_ID",
 	}
 
 	// Create placeholders for each channel
@@ -183,34 +190,56 @@ func saveMetadataAsYAML(metadata *Metadata) error {
 	}
 
 	// Write YAML data to file
-	fileName := "acquisition_metadata.yaml"
-	err = os.WriteFile(fileName, yamlData, 0644)
+	err = os.WriteFile(metadataOutPath, yamlData, 0644)
 	if err != nil {
 		return fmt.Errorf("error writing to YAML file: %v", err)
 	}
 
-	fmt.Printf("YAML metadata saved to %s\n", fileName)
+	fmt.Printf("YAML metadata saved to %s\n", metadataOutPath)
 	return nil
 }
 
 // Main function
 func main() {
-	// Define image path and jar path
-	imagePath := "C:/Users/Øyvind/OneDrive - Universitetet i Oslo/Work/03_UiO/04_Microscope_images_DO_NOT_USE/20240215_123_antibodyTest/20240215_123_DFCP1-GFP_IBIDI1B_ELYS_7.ims"
-	imagePath = "C:/Users/Øyvind/OneDrive - Universitetet i Oslo/Work/03_UiO/04_Microscope_images_DO_NOT_USE/20201108_004/004_SIN1_RICTR_MAP4K3_vPhaffin/RPE_MAP4K3-GFP_Phafin2-Halo_02_visit_1_D3D.dv"
+	// Load .env file
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
 
-	jarPath := "./bioformats_package.jar"
+	// Get the jarPath variable
+	jarPath := os.Getenv("JAR_PATH")
+
+	// Define flags
+	imagePathPtr := flag.String("image", "", "Path to the image file")
+	helpPtr := flag.Bool("h", false, "Display help")
+
+	// Parse flags
+	flag.Parse()
+
+	// Show help message if requested
+	if *helpPtr {
+		flag.PrintDefaults()
+		return
+	}
+
+	// Check if image path is provided
+	if *imagePathPtr == "" {
+		log.Fatal("Image path is required. Use -image flag to specify the path.")
+	}
 
 	// Read the metadata from the image file
-	metadata, err := readImageMetadata(imagePath, jarPath)
+	metadata, err := readImageMetadata(*imagePathPtr, jarPath)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Printf("metadata: %v\n", metadata)
 
+	// replace file extension with "_sampleInfo.yaml"
+	metadataOutPath := strings.TrimSuffix(*imagePathPtr, filepath.Ext(*imagePathPtr)) + "_sampleInfo.yaml"
 	// Save metadata to YAML file
-	err = saveMetadataAsYAML(metadata)
+	err = saveMetadataAsYAML(metadata, metadataOutPath)
 	if err != nil {
 		fmt.Printf("Error: %v\n", err)
 		os.Exit(1)
