@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/xml"
 	"flag"
@@ -51,6 +52,24 @@ type Channel struct {
 	SamplesPerPixel      int     `xml:"SamplesPerPixel,attr"`
 }
 
+// SampleInfo struct for user input fields
+type SampleInfo struct {
+	Channels   map[string]ChannelSample `yaml:"Channels"`
+	ELNID      string                   `yaml:"ELNID"`
+	SampleName string                   `yaml:"Sample name"`
+}
+
+// ChannelSample struct for user-defined channel details
+type ChannelSample struct {
+	Fluorophore string `yaml:"Fluorophore"`
+}
+
+// FinalYAML struct to hold the complete structure for YAML output
+type FinalYAML struct {
+	AcquisitionMetadata AcquisitionMetadata `yaml:"Acquisition metadata"`
+	SampleInfo          SampleInfo          `yaml:"Sample info"`
+}
+
 // AcquisitionMetadata struct to match desired YAML structure
 type AcquisitionMetadata struct {
 	Channels    map[string]ChannelInfo `yaml:"Channels"`
@@ -62,7 +81,7 @@ type AcquisitionMetadata struct {
 // ChannelInfo struct for channel details in YAML
 type ChannelInfo struct {
 	NameID               string  `yaml:"Name ID"`
-	EmissionWavelength   float64 `yaml:"Emmision wavelength"`
+	EmissionWavelength   float64 `yaml:"Emission wavelength"`
 	ExcitationWavelength float64 `yaml:"Excitation wavelength"`
 }
 
@@ -82,62 +101,91 @@ type PixelSizeInfo struct {
 	PhysicalSizeZ *float64 `yaml:"PhysicalSizeZ"`
 }
 
-// SampleInfo struct for user input fields
-type SampleInfo struct {
-	Channels map[string]ChannelSample `yaml:"Channels"`
-	ELNID    string                   `yaml:"ELNID"`
+func loadEnv() {
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal("Error loading .env file")
+	}
 }
 
-// ChannelSample struct for user-defined channel details
-type ChannelSample struct {
-	Fluorophore string `yaml:"Fluorophore"`
-	SampleName  string `yaml:"Sample name"`
+func parseFlags() (path, ext string, showHelp bool) {
+	pathPtr := flag.String("path", "", "Path to the image file or path to a directory containing images")
+	extPtr := flag.String("ext", "", "File extension to filter images") // obligatory if image path is a directory
+	helpPtr := flag.Bool("h", false, "Display help")
+
+	flag.Parse()
+
+	return *pathPtr, *extPtr, *helpPtr
 }
 
-// FinalYAML struct to hold the complete structure for YAML output
-type FinalYAML struct {
-	AquisitionMetadata AcquisitionMetadata `yaml:"Aquisition metadata"`
-	SampleInfo         SampleInfo          `yaml:"Sample info"`
+func validateFlags(path, ext string, showHelp bool) {
+	if showHelp {
+		flag.PrintDefaults()
+		os.Exit(1)
+	}
+
+	if path == "" {
+		log.Fatal("Image path is required. Use -path flag to specify the path.")
+	}
 }
 
-// Function to read metadata from an image using Bio-Formats
-func readImageMetadata(imagePath, jarPath string) (*Metadata, error) {
+func processDirectory(path, ext, jarPath string, sampleInfo *SampleInfo) {
+	files, err := os.ReadDir(path)
+	if err != nil {
+		log.Fatalf("Error reading directory: %v", err)
+	}
+
+	for _, file := range files {
+		if !file.IsDir() && strings.HasSuffix(file.Name(), ext) {
+			filePath := filepath.Join(path, file.Name())
+			err := processImage(filePath, jarPath, sampleInfo)
+			if err != nil {
+				log.Printf("Error processing file %s: %v", filePath, err)
+			}
+		}
+	}
+}
+
+func processImage(imagePath, jarPath string, sampleInfo *SampleInfo) error {
+	metadata, err := bfReadImageMetadata(imagePath, jarPath)
+	if err != nil {
+		log.Fatalf("Skipping file %s: %v", imagePath, err)
+		return nil // Continue processing other files
+	}
+
+	metadataOutPath := strings.TrimSuffix(imagePath, filepath.Ext(imagePath)) + "_sampleInfo.yaml"
+	err = saveMetadataAsYAML(metadata, metadataOutPath, sampleInfo)
+	if err != nil {
+		log.Printf("Error saving metadata as YAML for file %s: %v", imagePath, err)
+		return nil // Continue processing other files
+	}
+	return nil
+}
+
+func bfReadImageMetadata(imagePath, jarPath string) (*Metadata, error) {
 	cmd := exec.Command("java", "-Dfile.encoding=UTF-8", "-cp", jarPath, "loci.formats.tools.ImageInfo", "-omexml-only", "-nopix", imagePath)
-	fmt.Printf("cmd: %v\n", cmd)
-	// Capture standard output
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
-	// Run the command
 	err := cmd.Run()
 	if err != nil {
-		fmt.Println("Error:", err)
 		return nil, fmt.Errorf("error parsing XML: %v", err)
 	}
 
 	output := out.String()
-	//fmt.Printf("output: %v\n", output)
-
-	// Unmarshal the XML output into the Metadata struct
 	var metadata Metadata
 	err = xml.Unmarshal([]byte(output), &metadata)
-
-	// We are not interested in the thumbnail images so we remove them from the metadata
 	if err != nil {
-		fmt.Println("Error:", err)
-		return nil, fmt.Errorf("error Unmarshaling XML: %v", err)
+		return nil, fmt.Errorf("error unmarshaling XML: %v", err)
 	}
 
 	return &metadata, nil
 }
 
-// Function to create YAML structure and save it to a file
-// Function to create YAML structure and save it to a file
-func saveMetadataAsYAML(metadata *Metadata, metadataOutPath string) error {
-	// Prepare the acquisition metadata structure
+func saveMetadataAsYAML(metadata *Metadata, metadataOutPath string, sampleInfo *SampleInfo) error {
 	acquisition := AcquisitionMetadata{
 		Channels:    make(map[string]ChannelInfo),
-		DateAndTime: metadata.Images[0].AcquisitionDate, // Placeholder for date and time
+		DateAndTime: metadata.Images[0].AcquisitionDate,
 		ImageDims: ImageDimensions{
 			SizeC: metadata.Images[0].Pixels.SizeC,
 			SizeT: metadata.Images[0].Pixels.SizeT,
@@ -148,48 +196,29 @@ func saveMetadataAsYAML(metadata *Metadata, metadataOutPath string) error {
 		PixelSize: PixelSizeInfo{
 			PhysicalSizeX: metadata.Images[0].Pixels.PhysicalSizeX,
 			PhysicalSizeY: metadata.Images[0].Pixels.PhysicalSizeY,
-			PhysicalSizeZ: nil, // Set to nil or appropriate value
+			PhysicalSizeZ: ptr(metadata.Images[0].Pixels.PhysicalSizeZ),
 		},
 	}
 
-	// Fill in channel information for each channel in the metadata
 	for i, channel := range metadata.Images[0].Pixels.Channels {
 		channelInfo := ChannelInfo{
 			NameID:               fmt.Sprintf("%s %s", channel.ID, channel.Name),
 			EmissionWavelength:   channel.EmissionWavelength,
 			ExcitationWavelength: channel.ExcitationWavelength,
 		}
-		acquisition.Channels[fmt.Sprintf("Channel %d", i+1)] = channelInfo // Use i+1 to start numbering from 1
+		acquisition.Channels[fmt.Sprintf("Channel %d", i+1)] = channelInfo
 	}
 
-	// Prepare the sample information structure with placeholders
-	sample := SampleInfo{
-		Channels: make(map[string]ChannelSample),
-		ELNID:    "Please_fill_in_ELN_ID",
-	}
-
-	// Create placeholders for each channel
-	for i, _ := range metadata.Images[0].Pixels.Channels {
-		channelKey := fmt.Sprintf("Channel %d", i+1)
-		sample.Channels[channelKey] = ChannelSample{
-			Fluorophore: "Please_fill_in_a_fluorophore",
-			SampleName:  "Please_fill_in_a_sample_name",
-		}
-	}
-
-	// Combine acquisition metadata and sample information
 	finalYAML := FinalYAML{
-		AquisitionMetadata: acquisition,
-		SampleInfo:         sample,
+		AcquisitionMetadata: acquisition,
+		SampleInfo:          *sampleInfo,
 	}
 
-	// Convert to YAML
 	yamlData, err := yaml.Marshal(finalYAML)
 	if err != nil {
 		return fmt.Errorf("error marshaling to YAML: %v", err)
 	}
 
-	// Write YAML data to file
 	err = os.WriteFile(metadataOutPath, yamlData, 0644)
 	if err != nil {
 		return fmt.Errorf("error writing to YAML file: %v", err)
@@ -199,49 +228,183 @@ func saveMetadataAsYAML(metadata *Metadata, metadataOutPath string) error {
 	return nil
 }
 
-// Main function
-func main() {
-	// Load .env file
-	err := godotenv.Load()
-	if err != nil {
-		log.Fatal("Error loading .env file")
+func ptr(v float64) *float64 {
+	return &v
+}
+
+func createSampleInfoFile(filePath string) error {
+	sample := SampleInfo{
+		Channels:   make(map[string]ChannelSample),
+		ELNID:      "Please_fill_in_ELN_ID",
+		SampleName: "Please_fill_in_a_sample_name",
 	}
 
-	// Get the jarPath variable
+	sample.Channels["Channel 1"] = ChannelSample{Fluorophore: "Please_fill_in_a_fluorophore"}
+	sample.Channels["Channel 2"] = ChannelSample{Fluorophore: "Please_fill_in_a_fluorophore"}
+	sample.Channels["Channel 3"] = ChannelSample{Fluorophore: "NA"}
+	sample.Channels["Channel 4"] = ChannelSample{Fluorophore: "NA"}
+
+	yamlData, err := yaml.Marshal(sample)
+	if err != nil {
+		return fmt.Errorf("error marshaling sample info to YAML: %v", err)
+	}
+
+	err = os.WriteFile(filePath, yamlData, 0644)
+	if err != nil {
+		return fmt.Errorf("error writing sample info to YAML file: %v", err)
+	}
+
+	fmt.Printf("Sample info file created at %s. Please fill in the required values and then press 'y' to continue or 'n' to continue with default values.\n", filePath)
+	return nil
+}
+
+func waitForUserConfirmation() bool {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		fmt.Print("Have you completed filling in the sample info file? Press 'y' to proceed or 'n' to continue with default values: ")
+		input, _ := reader.ReadString('\n')
+		input = strings.TrimSpace(input)
+		if input == "y" || input == "yes" {
+			return true
+		}
+		if input == "n" || input == "no" {
+			return false
+		}
+	}
+}
+
+func main() {
+	loadEnv()
 	jarPath := os.Getenv("JAR_PATH")
 
-	// Define flags
-	imagePathPtr := flag.String("image", "", "Path to the image file")
-	helpPtr := flag.Bool("h", false, "Display help")
+	path, ext, showHelp := parseFlags()
+	validateFlags(path, ext, showHelp)
 
-	// Parse flags
-	flag.Parse()
-
-	// Show help message if requested
-	if *helpPtr {
-		flag.PrintDefaults()
-		return
-	}
-
-	// Check if image path is provided
-	if *imagePathPtr == "" {
-		log.Fatal("Image path is required. Use -image flag to specify the path.")
-	}
-
-	// Read the metadata from the image file
-	metadata, err := readImageMetadata(*imagePathPtr, jarPath)
+	info, err := os.Stat(path)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Error accessing path: %v", err)
 	}
-	fmt.Printf("metadata: %v\n", metadata)
 
-	// replace file extension with "_sampleInfo.yaml"
-	metadataOutPath := strings.TrimSuffix(*imagePathPtr, filepath.Ext(*imagePathPtr)) + "_sampleInfo.yaml"
-	// Save metadata to YAML file
-	err = saveMetadataAsYAML(metadata, metadataOutPath)
-	if err != nil {
-		fmt.Printf("Error: %v\n", err)
-		os.Exit(1)
+	sampleInfoFile := filepath.Join(path, "inputSampleInfo.yaml")
+	var sampleInfo *SampleInfo
+
+	if info.IsDir() {
+		if ext == "" {
+			log.Fatal("File extension is required when providing a directory path.")
+		}
+
+		firstImage := ""
+		files, err := os.ReadDir(path)
+		if err != nil {
+			log.Fatalf("Error reading directory: %v", err)
+		}
+
+		for _, file := range files {
+			if !file.IsDir() && strings.HasSuffix(file.Name(), ext) {
+				firstImage = filepath.Join(path, file.Name())
+				break
+			}
+		}
+
+		if firstImage == "" {
+			log.Fatal("No image files found in the directory with the specified extension.")
+		}
+
+		metadata, err := bfReadImageMetadata(firstImage, jarPath)
+		if err != nil {
+			log.Printf("Error reading metadata from the first image: %v. Continuing...", err)
+		} else {
+			numChannels := len(metadata.Images[0].Pixels.Channels)
+
+			if _, err := os.Stat(sampleInfoFile); err == nil {
+				fmt.Printf("Sample info file %s already exists.\n", sampleInfoFile)
+				if waitForUserConfirmation() {
+					yamlData, err := os.ReadFile(sampleInfoFile)
+					if err != nil {
+						log.Fatalf("Error reading sample info file: %v", err)
+					}
+
+					err = yaml.Unmarshal(yamlData, &sampleInfo)
+					if err != nil {
+						log.Fatalf("Error unmarshaling sample info YAML: %v", err)
+					}
+				} else {
+					err := os.Remove(sampleInfoFile)
+					if err != nil {
+						log.Printf("Error deleting sample info file: %v", err)
+					}
+
+					err = createSampleInfoFile(sampleInfoFile)
+					if err != nil {
+						log.Fatalf("Error creating sample info file: %v", err)
+					}
+
+					sampleInfo = &SampleInfo{
+						Channels:   make(map[string]ChannelSample),
+						ELNID:      "Please_fill_in_ELN_ID",
+						SampleName: "Please_fill_in_a_sample_name",
+					}
+
+					for i := 1; i <= numChannels; i++ {
+						if i <= 2 {
+							sampleInfo.Channels[fmt.Sprintf("Channel %d", i)] = ChannelSample{
+								Fluorophore: "Please_fill_in_a_fluorophore",
+							}
+						} else {
+							sampleInfo.Channels[fmt.Sprintf("Channel %d", i)] = ChannelSample{
+								Fluorophore: "NA",
+							}
+						}
+					}
+				}
+			} else {
+				err = createSampleInfoFile(sampleInfoFile)
+				if err != nil {
+					log.Fatalf("Error creating sample info file: %v", err)
+				}
+
+				if waitForUserConfirmation() {
+					yamlData, err := os.ReadFile(sampleInfoFile)
+					if err != nil {
+						log.Fatalf("Error reading sample info file: %v", err)
+					}
+
+					err = yaml.Unmarshal(yamlData, &sampleInfo)
+					if err != nil {
+						log.Fatalf("Error unmarshaling sample info YAML: %v", err)
+					}
+				} else {
+					err := os.Remove(sampleInfoFile)
+					if err != nil {
+						log.Printf("Error deleting sample info file: %v", err)
+					}
+
+					sampleInfo = &SampleInfo{
+						Channels:   make(map[string]ChannelSample),
+						ELNID:      "Please_fill_in_ELN_ID",
+						SampleName: "Please_fill_in_a_sample_name",
+					}
+
+					for i := 1; i <= numChannels; i++ {
+						if i <= 2 {
+							sampleInfo.Channels[fmt.Sprintf("Channel %d", i)] = ChannelSample{
+								Fluorophore: "Please_fill_in_a_fluorophore",
+							}
+						} else {
+							sampleInfo.Channels[fmt.Sprintf("Channel %d", i)] = ChannelSample{
+								Fluorophore: "NA",
+							}
+						}
+					}
+				}
+			}
+		}
+
+		processDirectory(path, ext, jarPath, sampleInfo)
+	} else {
+		err := processImage(path, jarPath, nil)
+		if err != nil {
+			log.Printf("Error processing file %s: %v", path, err)
+		}
 	}
 }
