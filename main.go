@@ -10,10 +10,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/joho/godotenv"
 	"gopkg.in/yaml.v2"
+
+	"github.com/oodegard/parse_ims_metadata_txt"
 )
 
 // Metadata struct to hold the entire XML structure
@@ -129,6 +132,162 @@ func validateFlags(path, ext string, showHelp bool) {
 	}
 }
 
+func processFolder(path, ext, jarPath string) {
+	sampleInfo, err := initializeSampleInfo(path, ext, jarPath)
+	if err != nil {
+		log.Fatalf("Error initializing sample info: %v", err)
+	}
+
+	processDirectory(path, ext, jarPath, sampleInfo)
+}
+
+func initializeSampleInfo(path, ext, jarPath string) (*SampleInfo, error) {
+	files, err := os.ReadDir(path)
+	if err != nil {
+		return nil, fmt.Errorf("error reading directory: %v", err)
+	}
+
+	firstImage := ""
+	for _, file := range files {
+		if !file.IsDir() && strings.HasSuffix(file.Name(), ext) {
+			firstImage = filepath.Join(path, file.Name())
+			break
+		}
+	}
+
+	if firstImage == "" {
+		return nil, fmt.Errorf("no image files found in the directory with the specified extension")
+	}
+
+	metadata, err := bfReadImageMetadata(firstImage, jarPath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading metadata from the first image: %v", err)
+	}
+
+	numChannels := len(metadata.Images[0].Pixels.Channels)
+	sampleInfoFile := filepath.Join(path, "inputSampleInfo.yaml")
+
+	var sampleInfo *SampleInfo
+	if _, err := os.Stat(sampleInfoFile); err == nil {
+		fmt.Printf("Sample info file %s already exists.\n", sampleInfoFile)
+		if waitForUserConfirmation() {
+			yamlData, err := os.ReadFile(sampleInfoFile)
+			if err != nil {
+				return nil, fmt.Errorf("error reading sample info file: %v", err)
+			}
+
+			err = yaml.Unmarshal(yamlData, &sampleInfo)
+			if err != nil {
+				return nil, fmt.Errorf("error unmarshaling sample info YAML: %v", err)
+			}
+		} else {
+			err := os.Remove(sampleInfoFile)
+			if err != nil {
+				return nil, fmt.Errorf("error deleting sample info file: %v", err)
+			}
+
+			err = createSampleInfoFile(sampleInfoFile, numChannels)
+			if err != nil {
+				return nil, fmt.Errorf("error creating sample info file: %v", err)
+			}
+
+			sampleInfo = createSampleInfo(numChannels)
+		}
+	} else {
+		err = createSampleInfoFile(sampleInfoFile, numChannels)
+		if err != nil {
+			return nil, fmt.Errorf("error creating sample info file: %v", err)
+		}
+
+		if waitForUserConfirmation() {
+			yamlData, err := os.ReadFile(sampleInfoFile)
+			if err != nil {
+				return nil, fmt.Errorf("error reading sample info file: %v", err)
+			}
+
+			err = yaml.Unmarshal(yamlData, &sampleInfo)
+			if err != nil {
+				return nil, fmt.Errorf("error unmarshaling sample info YAML: %v", err)
+			}
+		} else {
+			err := os.Remove(sampleInfoFile)
+			if err != nil {
+				return nil, fmt.Errorf("error deleting sample info file: %v", err)
+			}
+
+			sampleInfo = createSampleInfo(numChannels)
+		}
+	}
+
+	return sampleInfo, nil
+}
+
+func createSampleInfo(numChannels int) *SampleInfo {
+	sampleInfo := &SampleInfo{
+		Channels:   make(map[string]ChannelSample),
+		ELNID:      "Please_fill_in_ELN_ID",
+		SampleName: "Please_fill_in_a_sample_name",
+	}
+
+	for i := 1; i <= numChannels; i++ {
+		if i <= 2 {
+			sampleInfo.Channels[fmt.Sprintf("Channel %d", i)] = ChannelSample{
+				Fluorophore: "Please_fill_in_a_fluorophore",
+			}
+		} else {
+			sampleInfo.Channels[fmt.Sprintf("Channel %d", i)] = ChannelSample{
+				Fluorophore: "NA",
+			}
+		}
+	}
+
+	return sampleInfo
+}
+
+func processImage(imagePath, jarPath string, sampleInfo *SampleInfo) error {
+	// if imagePath ends with .ims
+	if filepath.Ext(imagePath) == ".ims" {
+		var metadataPath string
+
+		// Check if it matches the pattern _F[number].ims
+		if matched, _ := regexp.MatchString(`_F\d+\.ims$`, imagePath); matched {
+			// Always replace the pattern with _metadata.txt
+			base := strings.TrimSuffix(imagePath, filepath.Ext(imagePath))
+			base = regexp.MustCompile(`_F\d+$`).ReplaceAllString(base, "")
+			metadataPath = base + "_metadata.txt"
+		} else {
+			// Otherwise, just replace the .ims extension with _metadata.txt
+			metadataPath = strings.TrimSuffix(imagePath, ".ims") + "_metadata.txt"
+		}
+
+		// Check if the metadata file exists
+		if _, err := os.Stat(metadataPath); os.IsNotExist(err) {
+			fmt.Printf("Metadata file does not exist for %s\n", imagePath)
+			return nil
+		}
+
+		// Read metadata file
+		ims_metadata := parse_ims_metadata_txt.ParseImsMetadatatxt(metadataPath)
+		fmt.Printf("ims_metadata: %v\n", ims_metadata)
+
+		// if it did not return already then try bfReadImageMetadata (below)
+	}
+
+	metadata, err := bfReadImageMetadata(imagePath, jarPath)
+	if err != nil {
+		log.Fatalf("Skipping file %s: %v", imagePath, err)
+		return nil // Continue processing other files
+	}
+
+	metadataOutPath := strings.TrimSuffix(imagePath, filepath.Ext(imagePath)) + "_sampleInfo.yaml"
+	err = saveMetadataAsYAML(metadata, metadataOutPath, sampleInfo)
+	if err != nil {
+		log.Printf("Error saving metadata as YAML for file %s: %v", imagePath, err)
+		return nil // Continue processing other files
+	}
+	return nil
+}
+
 func processDirectory(path, ext, jarPath string, sampleInfo *SampleInfo) {
 	files, err := os.ReadDir(path)
 	if err != nil {
@@ -144,22 +303,6 @@ func processDirectory(path, ext, jarPath string, sampleInfo *SampleInfo) {
 			}
 		}
 	}
-}
-
-func processImage(imagePath, jarPath string, sampleInfo *SampleInfo) error {
-	metadata, err := bfReadImageMetadata(imagePath, jarPath)
-	if err != nil {
-		log.Fatalf("Skipping file %s: %v", imagePath, err)
-		return nil // Continue processing other files
-	}
-
-	metadataOutPath := strings.TrimSuffix(imagePath, filepath.Ext(imagePath)) + "_sampleInfo.yaml"
-	err = saveMetadataAsYAML(metadata, metadataOutPath, sampleInfo)
-	if err != nil {
-		log.Printf("Error saving metadata as YAML for file %s: %v", imagePath, err)
-		return nil // Continue processing other files
-	}
-	return nil
 }
 
 func bfReadImageMetadata(imagePath, jarPath string) (*Metadata, error) {
@@ -232,17 +375,8 @@ func ptr(v float64) *float64 {
 	return &v
 }
 
-func createSampleInfoFile(filePath string) error {
-	sample := SampleInfo{
-		Channels:   make(map[string]ChannelSample),
-		ELNID:      "Please_fill_in_ELN_ID",
-		SampleName: "Please_fill_in_a_sample_name",
-	}
-
-	sample.Channels["Channel 1"] = ChannelSample{Fluorophore: "Please_fill_in_a_fluorophore"}
-	sample.Channels["Channel 2"] = ChannelSample{Fluorophore: "Please_fill_in_a_fluorophore"}
-	sample.Channels["Channel 3"] = ChannelSample{Fluorophore: "NA"}
-	sample.Channels["Channel 4"] = ChannelSample{Fluorophore: "NA"}
+func createSampleInfoFile(filePath string, numChannels int) error {
+	sample := createSampleInfo(numChannels)
 
 	yamlData, err := yaml.Marshal(sample)
 	if err != nil {
@@ -285,122 +419,12 @@ func main() {
 		log.Fatalf("Error accessing path: %v", err)
 	}
 
-	sampleInfoFile := filepath.Join(path, "inputSampleInfo.yaml")
-	var sampleInfo *SampleInfo
-
 	if info.IsDir() {
 		if ext == "" {
 			log.Fatal("File extension is required when providing a directory path.")
 		}
 
-		firstImage := ""
-		files, err := os.ReadDir(path)
-		if err != nil {
-			log.Fatalf("Error reading directory: %v", err)
-		}
-
-		for _, file := range files {
-			if !file.IsDir() && strings.HasSuffix(file.Name(), ext) {
-				firstImage = filepath.Join(path, file.Name())
-				break
-			}
-		}
-
-		if firstImage == "" {
-			log.Fatal("No image files found in the directory with the specified extension.")
-		}
-
-		metadata, err := bfReadImageMetadata(firstImage, jarPath)
-		if err != nil {
-			log.Printf("Error reading metadata from the first image: %v. Continuing...", err)
-		} else {
-			numChannels := len(metadata.Images[0].Pixels.Channels)
-
-			if _, err := os.Stat(sampleInfoFile); err == nil {
-				fmt.Printf("Sample info file %s already exists.\n", sampleInfoFile)
-				if waitForUserConfirmation() {
-					yamlData, err := os.ReadFile(sampleInfoFile)
-					if err != nil {
-						log.Fatalf("Error reading sample info file: %v", err)
-					}
-
-					err = yaml.Unmarshal(yamlData, &sampleInfo)
-					if err != nil {
-						log.Fatalf("Error unmarshaling sample info YAML: %v", err)
-					}
-				} else {
-					err := os.Remove(sampleInfoFile)
-					if err != nil {
-						log.Printf("Error deleting sample info file: %v", err)
-					}
-
-					err = createSampleInfoFile(sampleInfoFile)
-					if err != nil {
-						log.Fatalf("Error creating sample info file: %v", err)
-					}
-
-					sampleInfo = &SampleInfo{
-						Channels:   make(map[string]ChannelSample),
-						ELNID:      "Please_fill_in_ELN_ID",
-						SampleName: "Please_fill_in_a_sample_name",
-					}
-
-					for i := 1; i <= numChannels; i++ {
-						if i <= 2 {
-							sampleInfo.Channels[fmt.Sprintf("Channel %d", i)] = ChannelSample{
-								Fluorophore: "Please_fill_in_a_fluorophore",
-							}
-						} else {
-							sampleInfo.Channels[fmt.Sprintf("Channel %d", i)] = ChannelSample{
-								Fluorophore: "NA",
-							}
-						}
-					}
-				}
-			} else {
-				err = createSampleInfoFile(sampleInfoFile)
-				if err != nil {
-					log.Fatalf("Error creating sample info file: %v", err)
-				}
-
-				if waitForUserConfirmation() {
-					yamlData, err := os.ReadFile(sampleInfoFile)
-					if err != nil {
-						log.Fatalf("Error reading sample info file: %v", err)
-					}
-
-					err = yaml.Unmarshal(yamlData, &sampleInfo)
-					if err != nil {
-						log.Fatalf("Error unmarshaling sample info YAML: %v", err)
-					}
-				} else {
-					err := os.Remove(sampleInfoFile)
-					if err != nil {
-						log.Printf("Error deleting sample info file: %v", err)
-					}
-
-					sampleInfo = &SampleInfo{
-						Channels:   make(map[string]ChannelSample),
-						ELNID:      "Please_fill_in_ELN_ID",
-						SampleName: "Please_fill_in_a_sample_name",
-					}
-
-					for i := 1; i <= numChannels; i++ {
-						if i <= 2 {
-							sampleInfo.Channels[fmt.Sprintf("Channel %d", i)] = ChannelSample{
-								Fluorophore: "Please_fill_in_a_fluorophore",
-							}
-						} else {
-							sampleInfo.Channels[fmt.Sprintf("Channel %d", i)] = ChannelSample{
-								Fluorophore: "NA",
-							}
-						}
-					}
-				}
-			}
-		}
-
-		processDirectory(path, ext, jarPath, sampleInfo)
+		processFolder(path, ext, jarPath)
 	} else {
 		err := processImage(path, jarPath, nil)
 		if err != nil {

@@ -1,5 +1,7 @@
 github.com/joho/godotenv v1.5.1 h1:7eLL/+HRGLY0ldzfGMeQkb7vMd0as4CfYvUVzLqw0N0=
 github.com/joho/godotenv v1.5.1/go.mod h1:f4LDr5Voq0i2e/R5DDNOoa2zzDfwtkZa6DnEwAbqwq4=
+github.com/oodegard/parse_ims_metadata_txt v0.0.3 h1:D7uD5x2T/Av9Zg4dJvSV7zDv8M6gf+5BgesoVIhC+NQ=
+github.com/oodegard/parse_ims_metadata_txt v0.0.3/go.mod h1:eyrx7YU1RdABXKoxEqK5ltVB1O1FuS2qqX8ZhRHVFig=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405 h1:yhCVgyC4o1eVCa2tZl7eS0r+SDo693bJlVdllGtEeKM=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v2 v2.4.0 h1:D8xgwECY7CYvx+Y2n4sBz93Jn9JRvxdiyyo8CTfuKaY=
