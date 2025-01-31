@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 )
 
 // Embed bfconvert.bat
@@ -30,6 +29,11 @@ var bfBat []byte
 //go:embed bftools/config.bat
 var configBat []byte
 
+// Embed showinf.bat or configure it if necessary
+//
+//go:embed bftools/showinf.bat
+var showinfBat []byte
+
 // PrintHelp executes the bfconvert.bat with the --help flag and returns the output.
 func PrintHelp() (string, error) {
 	tempDir, err := prepareFiles()
@@ -39,7 +43,6 @@ func PrintHelp() (string, error) {
 
 	batFile := filepath.Join(tempDir, "bfconvert.bat")
 
-	// Set environment and execute the command using the persistent temp files
 	cmd := exec.Command("cmd", "/C", batFile, "--help")
 	cmd.Env = append(os.Environ(), fmt.Sprintf("BF_DIR=%s", tempDir))
 
@@ -48,25 +51,24 @@ func PrintHelp() (string, error) {
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
 
-	// Execute the command
 	err = cmd.Run()
-	if err != nil && !strings.Contains(out.String(), "To convert a file between formats") {
+	if err != nil {
 		return out.String(), fmt.Errorf("error executing bfconvert.bat --help: %w, raw stderr: %s", err, stderr.String())
 	}
 
 	return out.String(), nil
 }
 
-// GetEssentialMetadata extracts metadata from a given file using bfconvert.bat with the -nopix flag
+// GetEssentialMetadata extracts metadata from a given file using showinf.bat with the -nopix flag
 func GetEssentialMetadata(filePath string) (string, error) {
 	tempDir, err := prepareFiles()
 	if err != nil {
 		return "", err
 	}
 
-	batFile := filepath.Join(tempDir, "bfconvert.bat")
+	batFile := filepath.Join(tempDir, "showinf.bat")
 
-	// Prepare the command to execute bfconvert.bat with -nopix to extract metadata
+	// Prepare the command to execute showinf.bat with -nopix to extract metadata
 	cmd := exec.Command("cmd", "/C", batFile, filePath, "-nopix")
 
 	var out bytes.Buffer
@@ -74,14 +76,12 @@ func GetEssentialMetadata(filePath string) (string, error) {
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
 
-	// Set the BF_DIR environment variable
 	cmd.Env = append(os.Environ(), fmt.Sprintf("BF_DIR=%s", tempDir))
 
 	// Execute the command
 	err = cmd.Run()
-	fmt.Printf("out.String(): %v\n", out.String())
 	if err != nil {
-		return out.String(), fmt.Errorf("error executing bfconvert.bat to get metadata: %w, stderr: %s", err, stderr.String())
+		return out.String(), fmt.Errorf("error executing showinf.bat to get metadata: %w, stderr: %s", err, stderr.String())
 	}
 
 	return out.String(), nil
@@ -102,6 +102,7 @@ func prepareFiles() (string, error) {
 		"bioformats_package.jar": bioformatsJar,
 		"bf.bat":                 bfBat,
 		"config.bat":             configBat,
+		"showinf.bat":            showinfBat,
 	}
 
 	for filename, data := range files {
