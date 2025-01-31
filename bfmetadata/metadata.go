@@ -10,34 +10,47 @@ import (
 	"strings"
 )
 
-// Embedding bfconvert.bat located in the bftools directory.
+// Embed bfconvert.bat
 //
 //go:embed bftools/bfconvert.bat
 var bfconvertBat []byte
 
+// Embed bioformats_package.jar
+//
+//go:embed bftools/bioformats_package.jar
+var bioformatsJar []byte
+
 // PrintHelp executes the embedded bfconvert.bat with the --help flag and returns the output.
 func PrintHelp() (string, error) {
-	// Create a temporary file to hold the bfconvert.bat script
+	// Create a temporary directory
 	tempDir, err := os.MkdirTemp("", "bfconvert")
-
 	if err != nil {
 		return "", fmt.Errorf("error creating temp directory: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
 
-	tempFile := filepath.Join(tempDir, "bfconvert.bat")
-
-	// Write the embedded bfconvertBat to the temporary file
-	err = os.WriteFile(tempFile, bfconvertBat, 0755)
+	// Write bfconvert.bat to the temporary file
+	batFile := filepath.Join(tempDir, "bfconvert.bat")
+	err = os.WriteFile(batFile, bfconvertBat, 0755)
 	if err != nil {
 		return "", fmt.Errorf("error writing bfconvert.bat to temp file: %w", err)
 	}
 
-	// Debugging: Print the path of the temporary file
-	fmt.Printf("Using temporary BFCONVERTPATH: %s\n", tempFile)
+	// Write bioformats_package.jar to the temporary file
+	jarFile := filepath.Join(tempDir, "bioformats_package.jar")
+	err = os.WriteFile(jarFile, bioformatsJar, 0644)
+	if err != nil {
+		return "", fmt.Errorf("error writing bioformats_package.jar to temp file: %w", err)
+	}
 
-	// Prepare the bfconvert.bat --help command
-	cmd := exec.Command("cmd", "/C", tempFile, "--help")
+	// Debugging: Print the paths
+	fmt.Printf("Using temporary BFCONVERTPATH: %s\n", batFile)
+	fmt.Printf("Using temporary BIOFORMATSPATH: %s\n", jarFile)
+
+	// Adjust environment variables to point to the temp directory
+	cmd := exec.Command("cmd", "/C", batFile, "--help")
+	cmd.Env = append(os.Environ(), fmt.Sprintf("BF_DIR=%s", tempDir))
+
 	var out bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &out
