@@ -32,9 +32,7 @@ var configBat []byte
 
 // PrintHelp executes the bfconvert.bat with the --help flag and returns the output.
 func PrintHelp() (string, error) {
-	// Determine the base temporary directory
-	tempDir := filepath.Join(os.TempDir(), "bioformats")
-	err := ensureFilesExist(tempDir)
+	tempDir, err := prepareFiles()
 	if err != nil {
 		return "", err
 	}
@@ -59,16 +57,43 @@ func PrintHelp() (string, error) {
 	return out.String(), nil
 }
 
-// ensureFilesExist ensures the necessary files are present in the temp directory.
-func ensureFilesExist(tempDir string) error {
+// GetEssentialMetadata extracts metadata from a given file using the bioformats_package.jar
+func GetEssentialMetadata(filePath string) (string, error) {
+	tempDir, err := prepareFiles()
+	if err != nil {
+		return "", err
+	}
+
+	jarFile := filepath.Join(tempDir, "bioformats_package.jar")
+
+	// Prepare the command to execute the JAR to extract metadata
+	// Hypothetical example: java -cp bioformats_package.jar loci.formats.tools.MetadataViewer --file <filePath>
+	cmd := exec.Command("java", "-cp", jarFile, "loci.formats.tools.MetadataViewer", "--file", filePath)
+
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+
+	// Execute the command
+	err = cmd.Run()
+	if err != nil {
+		return out.String(), fmt.Errorf("error executing bioformats_package.jar to get metadata: %w, stderr: %s", err, stderr.String())
+	}
+
+	return out.String(), nil
+}
+
+// prepareFiles ensures the necessary files are present in a designated temp directory.
+func prepareFiles() (string, error) {
+	tempDir := filepath.Join(os.TempDir(), "bioformats")
 	if _, err := os.Stat(tempDir); os.IsNotExist(err) {
 		err = os.MkdirAll(tempDir, 0755)
 		if err != nil {
-			return fmt.Errorf("error creating temp directory: %w", err)
+			return "", fmt.Errorf("error creating temp directory: %w", err)
 		}
 	}
 
-	// List of embedded files and their paths
 	files := map[string][]byte{
 		"bfconvert.bat":          bfconvertBat,
 		"bioformats_package.jar": bioformatsJar,
@@ -76,16 +101,15 @@ func ensureFilesExist(tempDir string) error {
 		"config.bat":             configBat,
 	}
 
-	// Check and write files if they don't exist
 	for filename, data := range files {
 		path := filepath.Join(tempDir, filename)
 		if _, err := os.Stat(path); os.IsNotExist(err) {
 			err := os.WriteFile(path, data, 0644)
 			if err != nil {
-				return fmt.Errorf("error writing %s to temp file: %w", filename, err)
+				return "", fmt.Errorf("error writing %s to temp file: %w", filename, err)
 			}
 		}
 	}
 
-	return nil
+	return tempDir, nil
 }
