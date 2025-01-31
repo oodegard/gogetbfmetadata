@@ -25,8 +25,12 @@ var bioformatsJar []byte
 //go:embed bftools/bf.bat
 var bfBat []byte
 
+//go:emed bftools/config.bat
+var configBat []byte
+
 // PrintHelp executes the embedded bfconvert.bat with the --help flag and returns the output.
 func PrintHelp() (string, error) {
+
 	// Create a temporary directory
 	tempDir, err := os.MkdirTemp("", "bfconvert")
 	if err != nil {
@@ -52,6 +56,12 @@ func PrintHelp() (string, error) {
 	err = os.WriteFile(jarFile, bioformatsJar, 0644)
 	if err != nil {
 		return "", fmt.Errorf("error writing bioformats_package.jar to temp file: %w", err)
+	}
+
+	configFile := filepath.Join(tempDir, "config.bat")
+	err = os.WriteFile(configFile, configBat, 0755)
+	if err != nil {
+		return "", fmt.Errorf("error writing config.bat to temp file: %w", err)
 	}
 
 	// Set environment and execute the command using the temporary files
