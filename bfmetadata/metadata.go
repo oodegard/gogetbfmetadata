@@ -60,7 +60,7 @@ func PrintHelp() (string, error) {
 }
 
 // GetEssentialMetadata extracts metadata from a given file using showinf.bat with the -nopix flag
-func GetEssentialMetadata(filePath string) (string, error) {
+func GetOmexmlMetadata(filePath string) (string, error) {
 	tempDir, err := prepareFiles()
 	if err != nil {
 		return "", err
