@@ -11,73 +11,36 @@ import (
 	"strings"
 )
 
-// Node represents a generic XML element structure
-type Node struct {
-	XMLName xml.Name
-	Content []byte `xml:",innerxml"`
-	Nodes   []Node `xml:",any"`
-}
-
-// Define structs according to the XML schema
-type Instrument struct {
-	ID        string    `xml:"ID,attr"`
-	Detector  Detector  `xml:"Detector"`
-	Objective Objective `xml:"Objective"`
-}
-
-type Detector struct {
-	ID    string `xml:"ID,attr"`
-	Model string `xml:"Model,attr"`
-	Type  string `xml:"Type,attr"`
-}
-
-type Objective struct {
-	ID                   string `xml:"ID,attr"`
-	Correction           string `xml:"Correction,attr"`
-	Immersion            string `xml:"Immersion,attr"`
-	LensNA               string `xml:"LensNA,attr"`
-	Manufacturer         string `xml:"Manufacturer,attr"`
-	Model                string `xml:"Model,attr"`
-	NominalMagnification string `xml:"NominalMagnification,attr"`
-	WorkingDistance      string `xml:"WorkingDistance,attr"`
-	WorkingDistanceUnit  string `xml:"WorkingDistanceUnit,attr"`
+type OME struct {
+	XMLName xml.Name `xml:"OME"`
+	Image   Image    `xml:"Image"`
 }
 
 type Image struct {
 	ID              string `xml:"ID,attr"`
 	Name            string `xml:"Name,attr"`
 	AcquisitionDate string `xml:"AcquisitionDate"`
-	InstrumentRef   Ref    `xml:"InstrumentRef"`
-	ObjectiveRef    Ref    `xml:"ObjectiveSettings"`
 	Pixels          Pixels `xml:"Pixels"`
 }
 
-type Ref struct {
-	ID string `xml:"ID,attr"`
-}
-
 type Pixels struct {
-	BigEndian      string    `xml:"BigEndian,attr"`
-	DimensionOrder string    `xml:"DimensionOrder,attr"`
-	ID             string    `xml:"ID,attr"`
-	Interleaved    string    `xml:"Interleaved,attr"`
-	PhysicalSizeX  string    `xml:"PhysicalSizeX,attr"`
-	PhysicalSizeY  string    `xml:"PhysicalSizeY,attr"`
-	PhysicalSizeZ  string    `xml:"PhysicalSizeZ,attr"`
-	SizeC          string    `xml:"SizeC,attr"`
-	SizeT          string    `xml:"SizeT,attr"`
-	SizeX          string    `xml:"SizeX,attr"`
-	SizeY          string    `xml:"SizeY,attr"`
-	SizeZ          string    `xml:"SizeZ,attr"`
-	Type           string    `xml:"Type,attr"`
-	Channels       []Channel `xml:"Channel"`
-}
-
-type Channel struct {
-	EmissionWavelength   string `xml:"EmissionWavelength,attr"`
-	ExcitationWavelength string `xml:"ExcitationWavelength,attr"`
-	ID                   string `xml:"ID,attr"`
-	Name                 string `xml:"Name,attr"`
+	BigEndian         string `xml:"BigEndian,attr"`
+	DimensionOrder    string `xml:"DimensionOrder,attr"`
+	ID                string `xml:"ID,attr"`
+	Interleaved       string `xml:"Interleaved,attr"`
+	PhysicalSizeX     string `xml:"PhysicalSizeX,attr"`
+	PhysicalSizeXUnit string `xml:"PhysicalSizeXUnit,attr"`
+	PhysicalSizeY     string `xml:"PhysicalSizeY,attr"`
+	PhysicalSizeYUnit string `xml:"PhysicalSizeYUnit,attr"`
+	PhysicalSizeZ     string `xml:"PhysicalSizeZ,attr"`
+	PhysicalSizeZUnit string `xml:"PhysicalSizeZUnit,attr"`
+	SignificantBits   int    `xml:"SignificantBits,attr"`
+	SizeC             int    `xml:"SizeC,attr"`
+	SizeT             int    `xml:"SizeT,attr"`
+	SizeX             int    `xml:"SizeX,attr"`
+	SizeY             int    `xml:"SizeY,attr"`
+	SizeZ             int    `xml:"SizeZ,attr"`
+	Type              string `xml:"Type,attr"`
 }
 
 // Embed bfconvert.bat
@@ -196,52 +159,52 @@ func prepareFiles() (string, error) {
 	return tempDir, nil
 }
 
-// GetMetadata retrieves and processes specific XML metadata
-func GetMetadata(filePath string) (Instrument, Image, error) {
-	metadataXML, err := GetOmexmlMetadata(filePath)
+func GetEssentialMetadata(imageFilePath string) (map[string]interface{}, error) {
+	// Simulate retrieving OME-XML metadata for the specified image file
+	metadataxml, err := GetOmexmlMetadata(imageFilePath)
 	if err != nil {
-		return Instrument{}, Image{}, fmt.Errorf("error retrieving OME-XML metadata: %w", err)
+		return nil, err
 	}
 
-	var instr Instrument
-	var img Image
-
-	err = ParseAndProcessMetadata(metadataXML, func(node Node) bool {
-		switch node.XMLName.Local {
-		case "Instrument":
-			if err := xml.Unmarshal(node.Content, &instr); err != nil {
-				fmt.Printf("Error unmarshalling Instrument: %v\n", err)
-			}
-		case "Image":
-			if err := xml.Unmarshal(node.Content, &img); err != nil {
-				fmt.Printf("Error unmarshalling Image: %v\n", err)
-			}
-		}
-		return true
-	})
+	metadata, err := parseXML(metadataxml)
 	if err != nil {
-		return Instrument{}, Image{}, fmt.Errorf("error processing XML metadata: %w", err)
+		return nil, err
 	}
 
-	return instr, img, nil
+	// Organize data into a format suitable for YAML
+	essentialMetadata := map[string]interface{}{
+		"Essential_metadata": map[string]interface{}{
+			"AcquisitionDate": metadata.Image.AcquisitionDate,
+			"DimensionOrder":  metadata.Image.Pixels.DimensionOrder,
+			"PhysicalSize": map[string]interface{}{
+				"X": metadata.Image.Pixels.PhysicalSizeX + " " + metadata.Image.Pixels.PhysicalSizeXUnit,
+				"Y": metadata.Image.Pixels.PhysicalSizeY + " " + metadata.Image.Pixels.PhysicalSizeYUnit,
+				"Z": metadata.Image.Pixels.PhysicalSizeZ + " " + metadata.Image.Pixels.PhysicalSizeZUnit,
+			},
+			"Size": map[string]interface{}{
+				"C": metadata.Image.Pixels.SizeC,
+				"T": metadata.Image.Pixels.SizeT,
+				"X": metadata.Image.Pixels.SizeX,
+				"Y": metadata.Image.Pixels.SizeY,
+				"Z": metadata.Image.Pixels.SizeZ,
+			},
+			"PixelBitDepth": metadata.Image.Pixels.SignificantBits,
+		},
+	}
+
+	return essentialMetadata, nil
 }
 
-// Efficiently parse and process the metadata XML using Node structure
-func ParseAndProcessMetadata(xmlData string, processFunc func(Node) bool) error {
-	var root Node
-	if err := xml.Unmarshal([]byte(xmlData), &root); err != nil {
-		return fmt.Errorf("error parsing XML: %w", err)
+func parseXML(xmlData string) (*OME, error) {
+	var ome OME
+
+	reader := strings.NewReader(xmlData)
+	decoder := xml.NewDecoder(reader)
+	decoder.DefaultSpace = ""
+
+	if err := decoder.Decode(&ome); err != nil {
+		return nil, err
 	}
 
-	walk(root.Nodes, processFunc)
-	return nil
-}
-
-// Recursive function to walk through nodes
-func walk(nodes []Node, processFunc func(Node) bool) {
-	for _, n := range nodes {
-		if processFunc(n) {
-			walk(n.Nodes, processFunc)
-		}
-	}
+	return &ome, nil
 }
