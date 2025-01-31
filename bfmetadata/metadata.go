@@ -57,28 +57,30 @@ func PrintHelp() (string, error) {
 	return out.String(), nil
 }
 
-// GetEssentialMetadata extracts metadata from a given file using the bioformats_package.jar
+// GetEssentialMetadata extracts metadata from a given file using bfconvert.bat with the -nopix flag
 func GetEssentialMetadata(filePath string) (string, error) {
 	tempDir, err := prepareFiles()
 	if err != nil {
 		return "", err
 	}
 
-	jarFile := filepath.Join(tempDir, "bioformats_package.jar")
+	batFile := filepath.Join(tempDir, "bfconvert.bat")
 
-	// Prepare the command to execute the JAR to extract metadata
-	// Hypothetical example: java -cp bioformats_package.jar loci.formats.tools.MetadataViewer --file <filePath>
-	cmd := exec.Command("java", "-cp", jarFile, "loci.formats.tools.MetadataViewer", "--file", filePath)
+	// Prepare the command to execute bfconvert.bat with -nopix to extract metadata
+	cmd := exec.Command("cmd", "/C", batFile, filePath, "-nopix")
 
 	var out bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
 
+	// Set the BF_DIR environment variable
+	cmd.Env = append(os.Environ(), fmt.Sprintf("BF_DIR=%s", tempDir))
+
 	// Execute the command
 	err = cmd.Run()
 	if err != nil {
-		return out.String(), fmt.Errorf("error executing bioformats_package.jar to get metadata: %w, stderr: %s", err, stderr.String())
+		return out.String(), fmt.Errorf("error executing bfconvert.bat to get metadata: %w, stderr: %s", err, stderr.String())
 	}
 
 	return out.String(), nil
