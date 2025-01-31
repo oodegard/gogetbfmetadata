@@ -1,4 +1,4 @@
-package bfmetadata
+package github.com/oodegard/gogetbfmetadata/bfmetadata
 
 import (
 	"bytes"
