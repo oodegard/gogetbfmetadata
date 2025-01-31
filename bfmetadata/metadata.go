@@ -2,6 +2,7 @@ package bfmetadata
 
 import (
 	"bytes"
+	_ "embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,32 +10,39 @@ import (
 	"strings"
 )
 
-// PrintHelp executes bfconvert.bat with the --help flag and returns the output
-// PrintHelp executes the bundled bfconvert.bat with the --help flag and returns the output
+// Embedding bfconvert.bat located in the bftools directory.
+//
+//go:embed bftools/bfconvert.bat
+var bfconvertBat []byte
+
+// PrintHelp executes the embedded bfconvert.bat with the --help flag and returns the output.
 func PrintHelp() (string, error) {
-	// Define relative path to bfconvert.bat
-	executablePath := filepath.Join("bftools", "bfconvert.bat")
+	// Create a temporary file to hold the bfconvert.bat script
+	tempDir, err := os.MkdirTemp("", "bfconvert")
 
-	// Resolve the absolute path of bfconvert.bat
-	absolutePath, err := filepath.Abs(executablePath)
 	if err != nil {
-		return "", fmt.Errorf("error resolving bfconvert path: %w", err)
+		return "", fmt.Errorf("error creating temp directory: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	tempFile := filepath.Join(tempDir, "bfconvert.bat")
+
+	// Write the embedded bfconvertBat to the temporary file
+	err = os.WriteFile(tempFile, bfconvertBat, 0755)
+	if err != nil {
+		return "", fmt.Errorf("error writing bfconvert.bat to temp file: %w", err)
 	}
 
-	// Check if the file exists at absolutePath
-	if _, err := os.Stat(absolutePath); err != nil {
-		return "", fmt.Errorf("bfconvert.bat not found at path: %s", absolutePath)
-	}
-
-	// Debugging: Print the resolved path
-	fmt.Printf("Using BFCONVERTPATH: %s\n", absolutePath)
+	// Debugging: Print the path of the temporary file
+	fmt.Printf("Using temporary BFCONVERTPATH: %s\n", tempFile)
 
 	// Prepare the bfconvert.bat --help command
-	cmd := exec.Command("cmd", "/C", absolutePath, "--help")
+	cmd := exec.Command("cmd", "/C", tempFile, "--help")
 	var out bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
+
 	// Execute the command
 	err = cmd.Run()
 	if err != nil && !strings.Contains(out.String(), "To convert a file between formats") {
