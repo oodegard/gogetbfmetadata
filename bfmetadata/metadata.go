@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Embed bfconvert.bat
@@ -59,7 +60,7 @@ func PrintHelp() (string, error) {
 	return out.String(), nil
 }
 
-// GetEssentialMetadata extracts metadata from a given file using showinf.bat with the -nopix flag
+// GetOmexmlMetadata extracts and cleans OME-XML metadata from a given file using showinf.bat
 func GetOmexmlMetadata(filePath string) (string, error) {
 	tempDir, err := prepareFiles()
 	if err != nil {
@@ -81,10 +82,17 @@ func GetOmexmlMetadata(filePath string) (string, error) {
 	// Execute the command
 	err = cmd.Run()
 	if err != nil {
-		return out.String(), fmt.Errorf("error executing showinf.bat to get metadata: %w, stderr: %s", err, stderr.String())
+		return "", fmt.Errorf("error executing showinf.bat to get metadata: %w, stderr: %s", err, stderr.String())
 	}
 
-	return out.String(), nil
+	// Capture the command output and clean it to extract the XML content
+	output := out.String()
+	xmlIndex := strings.Index(output, "<?xml")
+	if xmlIndex != -1 {
+		return output[xmlIndex:], nil
+	}
+
+	return "", fmt.Errorf("no XML content found in output: %s", stderr.String())
 }
 
 // prepareFiles ensures the necessary files are present in a designated temp directory.
