@@ -69,7 +69,7 @@ func GetEssentialMetadata(filePath string) (string, error) {
 	batFile := filepath.Join(tempDir, "showinf.bat")
 
 	// Prepare the command to execute showinf.bat with -nopix to extract metadata
-	cmd := exec.Command("cmd", "/C", batFile, filePath, "-nopix")
+	cmd := exec.Command("cmd", "/C", batFile, filePath, "-omexml-only")
 
 	var out bytes.Buffer
 	var stderr bytes.Buffer
