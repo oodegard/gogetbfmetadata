@@ -20,6 +20,11 @@ var bfconvertBat []byte
 //go:embed bftools/bioformats_package.jar
 var bioformatsJar []byte
 
+// Embedding bf.bat
+//
+//go:embed bftools/bf.bat
+var bfBat []byte
+
 // PrintHelp executes the embedded bfconvert.bat with the --help flag and returns the output.
 func PrintHelp() (string, error) {
 	// Create a temporary directory
@@ -28,6 +33,13 @@ func PrintHelp() (string, error) {
 		return "", fmt.Errorf("error creating temp directory: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
+
+	// Write bf.bat to the temporary file
+	bfBatFile := filepath.Join(tempDir, "bf.bat")
+	err = os.WriteFile(bfBatFile, bfBat, 0755)
+	if err != nil {
+		return "", fmt.Errorf("error writing bf.bat to temp file: %w", err)
+	}
 
 	// Write bfconvert.bat to the temporary file
 	batFile := filepath.Join(tempDir, "bfconvert.bat")
