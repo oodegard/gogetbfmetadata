@@ -1,3 +1,31 @@
+package bfmetadata
+
+import (
+	"bytes"
+	_ "embed"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+)
+
+// Embed bfconvert.bat
+//
+//go:embed bftools/bfconvert.bat
+var bfconvertBat []byte
+
+// Embed bioformats_package.jar
+//
+//go:embed bftools/bioformats_package.jar
+var bioformatsJar []byte
+
+// Embedding bf.bat
+//
+//go:embed bftools/bf.bat
+var bfBat []byte
+
+// PrintHelp executes the embedded bfconvert.bat with the --help flag and returns the output.
 func PrintHelp() (string, error) {
 	// Create a temporary directory
 	tempDir, err := os.MkdirTemp("", "bfconvert")
