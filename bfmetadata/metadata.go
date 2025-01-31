@@ -10,20 +10,13 @@ import (
 )
 
 // PrintHelp executes bfconvert.bat with the --help flag and returns the output
+// PrintHelp executes the bundled bfconvert.bat with the --help flag and returns the output
 func PrintHelp() (string, error) {
-	// Load the BFCONVERTPATH from environment variables
-	bfConvertPath := os.Getenv("BFCONVERTPATH")
-	if bfConvertPath == "" {
-		return "", fmt.Errorf("BFCONVERTPATH environment variable is not set")
-	}
-
-	// Adjust path to point to the batch file explicitly
-	if filepath.Ext(bfConvertPath) == "" {
-		bfConvertPath += ".bat" // Use the batch file on Windows
-	}
+	// Define relative path to bfconvert.bat
+	executablePath := filepath.Join("bftools", "bfconvert.bat")
 
 	// Resolve the absolute path of bfconvert.bat
-	absolutePath, err := filepath.Abs(bfConvertPath)
+	absolutePath, err := filepath.Abs(executablePath)
 	if err != nil {
 		return "", fmt.Errorf("error resolving bfconvert path: %w", err)
 	}
@@ -42,7 +35,6 @@ func PrintHelp() (string, error) {
 	var stderr bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &stderr
-
 	// Execute the command
 	err = cmd.Run()
 	if err != nil && !strings.Contains(out.String(), "To convert a file between formats") {
