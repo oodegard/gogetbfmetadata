@@ -79,6 +79,7 @@ func GetEssentialMetadata(filePath string) (string, error) {
 
 	// Execute the command
 	err = cmd.Run()
+	fmt.Printf("out.String(): %v\n", out.String())
 	if err != nil {
 		return out.String(), fmt.Errorf("error executing bfconvert.bat to get metadata: %w, stderr: %s", err, stderr.String())
 	}
