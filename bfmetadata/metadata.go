@@ -20,51 +20,28 @@ var bfconvertBat []byte
 //go:embed bftools/bioformats_package.jar
 var bioformatsJar []byte
 
-// Embedding bf.bat
+// Embed bf.bat
 //
 //go:embed bftools/bf.bat
 var bfBat []byte
 
-//go:emed bftools/config.bat
+// Embed config.bat
+//
+//go:embed bftools/config.bat
 var configBat []byte
 
-// PrintHelp executes the embedded bfconvert.bat with the --help flag and returns the output.
+// PrintHelp executes the bfconvert.bat with the --help flag and returns the output.
 func PrintHelp() (string, error) {
-
-	// Create a temporary directory
-	tempDir, err := os.MkdirTemp("", "bfconvert")
+	// Determine the base temporary directory
+	tempDir := filepath.Join(os.TempDir(), "bioformats")
+	err := ensureFilesExist(tempDir)
 	if err != nil {
-		return "", fmt.Errorf("error creating temp directory: %w", err)
-	}
-	defer os.RemoveAll(tempDir)
-
-	// Write bf.bat to the temporary file
-	bfBatFile := filepath.Join(tempDir, "bf.bat")
-	err = os.WriteFile(bfBatFile, bfBat, 0755)
-	if err != nil {
-		return "", fmt.Errorf("error writing bf.bat to temp file: %w", err)
+		return "", err
 	}
 
-	// Write other files like bfconvert.bat and bioformats_package.jar
 	batFile := filepath.Join(tempDir, "bfconvert.bat")
-	err = os.WriteFile(batFile, bfconvertBat, 0755)
-	if err != nil {
-		return "", fmt.Errorf("error writing bfconvert.bat to temp file: %w", err)
-	}
 
-	jarFile := filepath.Join(tempDir, "bioformats_package.jar")
-	err = os.WriteFile(jarFile, bioformatsJar, 0644)
-	if err != nil {
-		return "", fmt.Errorf("error writing bioformats_package.jar to temp file: %w", err)
-	}
-
-	configFile := filepath.Join(tempDir, "config.bat")
-	err = os.WriteFile(configFile, configBat, 0755)
-	if err != nil {
-		return "", fmt.Errorf("error writing config.bat to temp file: %w", err)
-	}
-
-	// Set environment and execute the command using the temporary files
+	// Set environment and execute the command using the persistent temp files
 	cmd := exec.Command("cmd", "/C", batFile, "--help")
 	cmd.Env = append(os.Environ(), fmt.Sprintf("BF_DIR=%s", tempDir))
 
@@ -80,4 +57,35 @@ func PrintHelp() (string, error) {
 	}
 
 	return out.String(), nil
+}
+
+// ensureFilesExist ensures the necessary files are present in the temp directory.
+func ensureFilesExist(tempDir string) error {
+	if _, err := os.Stat(tempDir); os.IsNotExist(err) {
+		err = os.MkdirAll(tempDir, 0755)
+		if err != nil {
+			return fmt.Errorf("error creating temp directory: %w", err)
+		}
+	}
+
+	// List of embedded files and their paths
+	files := map[string][]byte{
+		"bfconvert.bat":          bfconvertBat,
+		"bioformats_package.jar": bioformatsJar,
+		"bf.bat":                 bfBat,
+		"config.bat":             configBat,
+	}
+
+	// Check and write files if they don't exist
+	for filename, data := range files {
+		path := filepath.Join(tempDir, filename)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			err := os.WriteFile(path, data, 0644)
+			if err != nil {
+				return fmt.Errorf("error writing %s to temp file: %w", filename, err)
+			}
+		}
+	}
+
+	return nil
 }
